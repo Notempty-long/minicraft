@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terraria 2D-ish (Browser)</title>
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #gameCanvas {
+            border: 2px solid #4a5568; /* gray-700 */
+            background-color: #87CEEB; /* Sky Blue */
+            display: block; /* Prevent extra space below canvas */
+            margin: 20px auto; /* Center the canvas */
+            max-width: 100%; /* Responsive width */
+            height: auto; /* Maintain aspect ratio */
+            border-radius: 0.5rem; /* rounded-md */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* shadow-md */
+        }
+        .game-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f7fafc; /* bg-gray-100 */
+        }
+    </style>
+    <style>
+      @font-face {
+        font-family: 'LucideIcons';
+        src: url(https://unpkg.com/lucide-static@latest/font/Lucide.ttf) format('truetype');
+      }
+      .lucide {
+        font-family: 'LucideIcons';
+        font-style: normal;
+        font-weight: 400;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        display: inline-block;
+        line-height: 1;
+      }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="game-container">
+        <div class="bg-white p-8 rounded-lg shadow-md flex flex-col items-center">
+            <h1 class="text-2xl font-semibold text-gray-800 mb-4">Terraria 2D-ish</h1>
+            <canvas id="gameCanvas" width="800" height="600"></canvas>
+            <div class="mt-4 flex space-x-4">
+                <button id="saveButton" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded flex items-center">
+                    <span class="lucide mr-2">&#xea41;</span> Save
+                </button>
+                <button id="loadButton" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded flex items-center">
+                    <span class="lucide mr-2">&#xea40;</span> Load
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const saveButton = document.getElementById('saveButton');
+        const loadButton = document.getElementById('loadButton');
+
+        // Game settings
+        const BLOCK_SIZE = 30;
+        const WIDTH = canvas.width;
+        const HEIGHT = canvas.height;
+        const CHUNK_SIZE = 16; // Chunks are 16x16 blocks
+        const WORLD_WIDTH_CHUNKS = Math.ceil(WIDTH / BLOCK_SIZE / CHUNK_SIZE);
+        const WORLD_HEIGHT_CHUNKS = Math.ceil(HEIGHT / BLOCK_SIZE / CHUNK_SIZE);
+
+        // Colors
+        const WHITE = 'white';
+        const BROWN = '#a0522d';  // Dirt
+        const GREEN = '#00ff00';  // Grass
+        const GRAY = '#808080';    // Stone
+        const BLUE = '#0000ff';    // Water
+        const SKY_BLUE = '#87ceeb';  // Sky Blue
+
+        let playerX = WIDTH / 2 - BLOCK_SIZE / 2;
+        let playerY = 0;
+        const playerSize = BLOCK_SIZE;
+        const playerSpeed = 5;
+
+        let world = {}; // Store chunks as world["chunkX,chunkY"] = chunkData;
+
+        function generateChunk(chunkX, chunkY) {
+            const chunk = [];
+            for (let y = 0; y < CHUNK_SIZE; y++) {
+                chunk[y] = [];
+                for (let x = 0; x < CHUNK_SIZE; x++) {
+                    const worldX = chunkX * CHUNK_SIZE + x;
+                    const worldY = chunkY * CHUNK_SIZE + y;
+                    if (worldY > WORLD_HEIGHT / 2) {
+                        if (Math.random() < 0.8) {
+                            chunk[y][x] = 1; // Dirt
+                        } else if (Math.random() < 0.01) {
+                            chunk[y][x] = 3; // Water
+                        } else {
+                            chunk[y][x] = 0; // Air
+                        }
+                    } else if (worldY > WORLD_HEIGHT * 3 / 4) {
+                        if (Math.random() < 0.3) {
+                            chunk[y][x] = 2; // Stone
+                        } else {
+                            chunk[y][x] = 0; // Air
+                        }
+                    } else if (worldY === Math.floor(WORLD_HEIGHT / 2)) {
+                        const nextChunkY = chunkY + 1;
+                        const nextChunkKey = `${chunkX},${nextChunkY}`;
+                        if (world[nextChunkKey] && world[nextChunkKey][y + 1] && world[nextChunkKey][y + 1][x] === 1) {
+                            chunk[y][x] = 4; // Grass
+                        } else {
+                            chunk[y][x] = 0; // Air
+                        }
+                    }
+                    else {
+                        chunk[y][x] = 0; // Air
+                    }
+                }
+            }
+            return chunk;
+        }
+
+        function getWorldBlock(worldX, worldY) {
+            const chunkX = Math.floor(worldX / CHUNK_SIZE);
+            const chunkY = Math.floor(worldY / CHUNK_SIZE);
+            const xInChunk = worldX % CHUNK_SIZE;
+            const yInChunk = worldY % CHUNK_SIZE;
+            const chunkKey = `${chunkX},${chunkY}`;
+
+            if (!world[chunkKey]) {
+                world[chunkKey] = generateChunk(chunkX, chunkY);
+            }
+            return world[chunkKey][yInChunk][xInChunk];
+        }
+
+        function setWorldBlock(worldX, worldY, blockType) {
+            const chunkX = Math.floor(worldX / CHUNK_SIZE);
+            const chunkY = Math.floor(worldY / CHUNK_SIZE);
+            const xInChunk = worldX % CHUNK_SIZE;
+            const yInChunk = worldY % CHUNK_SIZE;
+            const chunkKey = `${chunkX},${chunkY}`;
+
+            if (!world[chunkKey]) {
+                world[chunkKey] = generateChunk(chunkX, chunkY);
+            }
+            world[chunkKey][yInChunk][xInChunk] = blockType;
+        }
+
+
+        function drawWorld() {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+            for (let chunkX = 0; chunkX < WORLD_WIDTH_CHUNKS; chunkX++) {
+                for (let chunkY = 0; chunkY < WORLD_HEIGHT_CHUNKS; chunkY++) {
+                    const chunkKey = `${chunkX},${chunkY}`;
+                    if (!world[chunkKey]) {
+                        world[chunkKey] = generateChunk(chunkX, chunkY);
+                    }
+                    const chunk = world[chunkKey];
+                    for (let y = 0; y < CHUNK_SIZE; y++) {
+                        for (let x = 0; x < CHUNK_SIZE; x++) {
+                            const worldX = chunkX * CHUNK_SIZE + x;
+                            const worldY = chunkY * CHUNK_SIZE + y;
+                            const blockX = worldX * BLOCK_SIZE;
+                            const blockY = worldY * BLOCK_SIZE;
+                            let color = SKY_BLUE;
+
+                            switch (chunk[y][x]) {
+                                case 1: color = BROWN; break;
+                                case 2: color = GRAY; break;
+                                case 3: color = BLUE; break;
+                                case 4: color = GREEN; break;
+                                case 0: color = SKY_BLUE; break;
+                            }
+
+                            ctx.fillStyle = color;
+                            ctx.fillRect(blockX, blockY, BLOCK_SIZE, BLOCK_SIZE);
+                            ctx.strokeStyle = '#374151'; // gray-800 - subtle border
+                            ctx.strokeRect(blockX, blockY, BLOCK_SIZE, BLOCK_SIZE);
+                        }
+                    }
+                }
+            }
+        }
+
+        function drawPlayer() {
+            ctx.fillStyle = WHITE;
+            ctx.fillRect(playerX, playerY, playerSize, playerSize);
+            ctx.strokeStyle = '#f5f5f5'; // slightly lighter border
+            ctx.strokeRect(playerX, playerY, playerSize, playerSize);
+        }
+
+        function checkCollision(newPlayerX, newPlayerY) {
+            const playerRect = { x: newPlayerX, y: newPlayerY, width: playerSize, height: playerSize };
+
+            for (let chunkX = Math.floor(newPlayerX / BLOCK_SIZE / CHUNK_SIZE) - 1; chunkX <= Math.ceil((newPlayerX + playerSize) / BLOCK_SIZE / CHUNK_SIZE); chunkX++) {
+                for (let chunkY = Math.floor(newPlayerY / BLOCK_SIZE / CHUNK_SIZE) - 1; chunkY <= Math.ceil((newPlayerY + playerSize) / BLOCK_SIZE / CHUNK_SIZE); chunkY++) {
+                    const chunkKey = `${chunkX},${chunkY}`;
+                    if (world[chunkKey]) { // Only check existing chunks
+                        for (let y = 0; y < CHUNK_SIZE; y++) {
+                            for (let x = 0; x < CHUNK_SIZE; x++) {
+                                const worldX = chunkX * CHUNK_SIZE + x;
+                                const worldY = chunkY * CHUNK_SIZE + y;
+                                if (worldX >= 0 && worldX < WIDTH / BLOCK_SIZE && worldY >= 0 && worldY < HEIGHT / BLOCK_SIZE) {
+                                    if (getWorldBlock(worldX, worldY) !== 0) { // If it's not air
+                                        const blockX = worldX * BLOCK_SIZE;
+                                        const blockY = worldY * BLOCK_SIZE;
+                                        const blockRect = { x: blockX, y: blockY, width: BLOCK_SIZE, height: BLOCK_SIZE };
+
+                                        if (isIntersecting(playerRect, blockRect)) {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        function isIntersecting(rect1, rect2) {
+            return !(rect2.x > rect1.x + rect1.width ||
+                     rect2.x + rect2.width < rect1.x ||
+                     rect2.y > rect1.y + rect1.height ||
+                     rect2.y + rect2.height < rect1.y);
+        }
+
+        function mineBlock(x, y) {
+            if (x >= 0 && x < WIDTH / BLOCK_SIZE && y >= 0 && y < HEIGHT / BLOCK_SIZE) {
+                setWorldBlock(x, y, 0); // Set to air
+                drawWorld(); // Update the display
+                drawPlayer();
+            }
+        }
+
+        // Save and Load functions using localStorage
+        function saveLevel() {
+            try {
+                localStorage.setItem('terrariaWorld', JSON.stringify(world));
+                localStorage.setItem('terrariaPlayerX', playerX.toString());
+                localStorage.setItem('terrariaPlayerY', playerY.toString());
+                console.log('Level saved!');
+            } catch (e) {
+                console.error('Failed to save level:', e);
+                alert('Failed to save level.  Your browser may not support localStorage, or there may be insufficient space.');
+            }
+        }
+
+        function loadLevel() {
+            try {
+                const savedWorld = localStorage.getItem('terrariaWorld');
+                const savedPlayerX = localStorage.getItem('terrariaPlayerX');
+                const savedPlayerY = localStorage.getItem('terrariaPlayerY');
+
+                if (savedWorld && savedPlayerX && savedPlayerY) {
+                    world = JSON.parse(savedWorld);
+                    playerX = parseInt(savedPlayerX, 10);
+                    playerY = parseInt(savedPlayerY, 10);
+                    console.log('Level loaded!');
+                } else {
+                    console.log('No saved level found, generating new world.');
+                    generateWorld(); // Generate a new world if no saved data
+                    return; // Important: Exit here to avoid errors
+                }
+
+                // Basic validation of loaded data
+                if (typeof world !== 'object') {
+                    console.error('Error: Loaded world is not an object.', world);
+                    generateWorld();
+                    return;
+                }
+                if (typeof playerX !== 'number' || typeof playerY !== 'number') {
+                    console.error('Error: Player coordinates are not numbers.');
+                    generateWorld();
+                    return;
+                }
+
+                //check chunk by chunk
+                for (let chunkKey in world){
+                    if(!Array.isArray(world[chunkKey])){
+                        console.error('Error: chunk is not an array', world[chunkKey]);
+                        generateWorld();
+                        return;
+                    }
+                    let chunk = world[chunkKey];
+                    for(let y = 0; y < CHUNK_SIZE; y++){
+                        if(!Array.isArray(chunk[y])){
+                            console.error('Error: chunk row is not an array', chunk[y]);
+                            generateWorld();
+                            return;
+                        }
+                        for(let x = 0; x < CHUNK_SIZE; x++){
+                            if(typeof chunk[y][x] !== 'number'){
+                                console.error('Error: Invalid data type in chunk. Expected a number, got', typeof chunk[y][x]);
+                                generateWorld();
+                                return;
+                            }
+                        }
+                    }
+                }
+                drawWorld();
+                drawPlayer();
+
+            } catch (e) {
+                console.error('Failed to load level:', e);
+                alert('Failed to load level.  Your browser may not support localStorage, or the saved data may be corrupted.');
+                generateWorld();
+                drawWorld();
+                drawPlayer();
+            }
+        }
+
+        // Initialize and start the game
+        function generateWorld() {
+            world = {}; // Reset the world object
+            for (let chunkX = 0; chunkX < WORLD_WIDTH_CHUNKS; chunkX++) {
+                for (let chunkY = 0; chunkY < WORLD_HEIGHT_CHUNKS; chunkY++) {
+                    const chunkKey = `${chunkX},${chunkY}`;
+                    world[chunkKey] = generateChunk(chunkX, chunkY);
+                }
+            }
+        }
+
+        loadLevel(); // Load on start
+
+        function gameLoop() {
+            let newPlayerX = playerX;
+            let newPlayerY = playerY;
+
+            if (keys['ArrowLeft'] || keys['a']) {
+                newPlayerX -= playerSpeed;
+            }
+            if (keys['ArrowRight'] || keys['d']) {
+                newPlayerX += playerSpeed;
+            }
+            if (keys['ArrowUp'] || keys['w']) {
+                newPlayerY -= playerSpeed;
+            }
+            if (keys['ArrowDown'] || keys['s']) {
+                newPlayerY += playerSpeed;
+            }
+
+            if (!checkCollision(newPlayerX, newPlayerY)) {
+                playerX = newPlayerX;
+                playerY = newPlayerY;
+            }
+
+            drawWorld();
+            drawPlayer();
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop(); // Start the animation loop
+    </script>
+</body>
+</html>
